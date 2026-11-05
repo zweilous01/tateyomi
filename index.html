@@ -75,8 +75,16 @@ body.t-draw .pgin{touch-action:none;cursor:crosshair}
 .addrow button{border:1.5px dashed var(--line);background:var(--surface);border-radius:999px;padding:10px 22px;font-size:14px;font-weight:700}
 .ly{position:absolute;left:0;top:0;pointer-events:none}
 canvas.raster{width:800px;height:1130px}
-.limg img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
-.limg.flip img{transform:scaleX(-1)}
+.limg .lin{position:absolute;inset:0;transform-origin:50% 50%}
+.limg.flip .lin{transform:scaleX(-1)}
+.limg img{position:absolute;display:block;max-width:none;pointer-events:none}
+.limg .gimg{opacity:.35;display:none}
+.limg.cropping .gimg{display:block}
+#selbox .ch{position:absolute;width:calc(26px / var(--s));height:calc(26px / var(--s));margin:calc(-13px / var(--s)) 0 0 calc(-13px / var(--s));border-radius:calc(6px / var(--s));background:#fff;border:calc(3px / var(--s)) solid var(--accent);box-shadow:0 0 0 calc(1px / var(--s)) rgb(0 0 0 / .3);pointer-events:auto;touch-action:none;display:none}
+#selbox .ch[data-h="n"],#selbox .ch[data-h="s"]{cursor:ns-resize}#selbox .ch[data-h="e"],#selbox .ch[data-h="w"]{cursor:ew-resize}
+#selbox.crop .ch,#selbox.box .ch.edge{display:block}
+#selbox.crop .handle{display:none}
+#selbox.crop{outline-color:#f08a24}
 .limg.framed::after{content:"";position:absolute;inset:0;border:6px solid #16161a}
 body.t-move .limg,body.t-move .ltxt{pointer-events:auto;touch-action:none;cursor:move}
 body.t-move .ly.locked{pointer-events:none}
@@ -375,7 +383,8 @@ let changeVer=0, savedVer=0, saving=false, saveAgain=false, saveTimer=null, last
 let S=null, D=null, G=null;
 const desk=$('#desk'), pagesEl=$('#pages'), sheetEl=$('#sheet'), ghost=$('#ghost');
 const live=newCanvas(PW*DR,PH*DR); live.id='live';
-const selbox=document.createElement('div'); selbox.id='selbox'; selbox.innerHTML='<div class="handle"></div>';
+const selbox=document.createElement('div'); selbox.id='selbox'; selbox.innerHTML='<div class="handle"></div>'+[['nw',0,0],['n',50,0],['ne',100,0],['e',100,50],['se',100,100],['s',50,100],['sw',0,100],['w',0,50]].map(([h,x,y])=>`<div class="ch${h.length===1?' edge':''}" data-h="${h}" style="left:${x}%;top:${y}%"></div>`).join('');
+let cropL=null;
 $$('[data-ic]').forEach(e=>e.insertAdjacentHTML('afterbegin',ic(e.dataset.ic)));
 
 /* ================= 画像キャッシュ ================= */
@@ -389,17 +398,32 @@ const imgOk=im=>im&&im.complete&&im.naturalWidth>0;
 
 /* ================= 文字の組版（画面と書き出しで共通） ================= */
 const mctx=newCanvas(4,4).getContext('2d');
-const fontStr=l=>{const f=FONTS[l.font]||FONTS[0];return `${f.w} ${l.size}px ${f.fam}, sans-serif`;};
+const fontStr=(l,sz)=>{const f=FONTS[l.font]||FONTS[0];return `${f.w} ${sz||l.size}px ${f.fam}, sans-serif`;};
 const vTokens=line=>line.match(/[!?！？]{2}|\d{2}|./gsu)||[];
-function textLayout(l){
-  const s=l.size, lh=s*1.4, lines=(l.text||' ').split('\n'); mctx.font=fontStr(l);
+function bubbleK(b){return b==='none'?null:b==='box'?null:b==='ellipse'?1.42:b==='spike'?1.85:1.7;}
+function contentSize(l,s){
+  const lh=s*1.4, lines=(l.text||' ').split('\n'); mctx.font=fontStr(l,s);
   let cw,ch,cols=null;
   if(!l.vertical){cw=Math.max(s*.5,...lines.map(t=>mctx.measureText(t).width));ch=lines.length*lh;}
   else{cols=lines.map(vTokens);cw=lines.length*lh;ch=Math.max(1,...cols.map(c=>c.length))*s*1.02;}
+  return{lh,lines,cols,cw,ch};
+}
+/* 吹き出しの大きさを固定したとき、中に収まる文字の大きさ */
+function fitSize(l){
+  const c=contentSize(l,100),a=c.cw/100,b=c.ch/100,bb=l.bubble||'none',k=bubbleK(bb);let s;
+  if(bb==='none')s=Math.min(l.bw/(a+.4),l.bh/(b+.4));
+  else if(bb==='box')s=Math.min(l.bw/(a+1.3),l.bh/(b+1.1));
+  else s=Math.min(l.bw/(a*k+.8),l.bh/(b*k+.8));
+  return clamp(Math.floor(s),6,400);
+}
+function textLayout(l){
+  const fixed=l.bw>0&&l.bh>0, s=fixed?fitSize(l):l.size;
+  const {lh,lines,cols,cw,ch}=contentSize(l,s);
   const b=l.bubble||'none'; let bw,bh;
-  if(b==='none'){bw=cw+s*.4;bh=ch+s*.4;}
+  if(fixed){bw=l.bw;bh=l.bh;}
+  else if(b==='none'){bw=cw+s*.4;bh=ch+s*.4;}
   else if(b==='box'){bw=cw+s*1.3;bh=ch+s*1.1;}
-  else{const k=b==='ellipse'?1.42:b==='spike'?1.85:1.7;bw=cw*k+s*.8;bh=ch*k+s*.8;}
+  else{const k=bubbleK(b);bw=cw*k+s*.8;bh=ch*k+s*.8;}
   const tail=(b!=='none'&&l.tail&&l.tail!=='none')?s*1.4:0;
   const m=Math.ceil(Math.max(tail,s*.25,8)+8);
   return{s,lh,lines,cols,cw,ch,bw,bh,m,tail};
@@ -428,7 +452,7 @@ function drawBubble(g,l,L,cx,cy){
 function drawText(g,l,ox,oy,L){
   L=L||textLayout(l); const s=L.s,cx=ox+L.bw/2,cy=oy+L.bh/2;
   if(l.bubble&&l.bubble!=='none')drawBubble(g,l,L,cx,cy);
-  g.save(); g.font=fontStr(l); g.textAlign='center'; g.textBaseline='middle';
+  g.save(); g.font=fontStr(l,L.s); g.textAlign='center'; g.textBaseline='middle';
   const oc=isLight(l.color)?'#16161a':'#ffffff', tx=cx-L.cw/2, ty=cy-L.ch/2;
   const put=(t,x,y,rot,sx)=>{g.save();g.translate(x,y);if(rot)g.rotate(Math.PI/2);if(sx)g.scale(sx,1);
     if(l.outline){g.lineJoin='round';g.lineWidth=s*.2;g.strokeStyle=oc;g.strokeText(t,0,0);}g.fillStyle=l.color;g.fillText(t,0,0);g.restore();};
@@ -442,11 +466,21 @@ function drawText(g,l,ox,oy,L){
     else put(t,x,y);});});
   g.restore();
 }
+/* 写真：枠(x,y,w,h)の中で、写真本体をcr={x,y,w,h}（枠の左上からの位置・大きさ）に置く。枠からはみ出た部分は見えない */
+function imgRect(l){
+  if(l.cr)return l.cr;
+  const nw=l.nw||l.w,nh=l.nh||l.h,k=Math.max(l.w/nw,l.h/nh),iw=nw*k,ih=nh*k;
+  return{x:(l.w-iw)/2,y:(l.h-ih)/2,w:iw,h:ih};
+}
+/* 見た目どおり（左右反転も反映）のページ上の写真本体の位置 */
+function imgPage(l){const r=imgRect(l);return{x:l.x+(l.flip?l.w-r.x-r.w:r.x),y:l.y+r.y,w:r.w,h:r.h};}
+function setImgPage(l,R){l.cr={x:l.flip?l.w-(R.x-l.x)-R.w:R.x-l.x,y:R.y-l.y,w:R.w,h:R.h};}
+function scaleImage(l,f){const r=imgRect(l);l.cr={x:r.x*f,y:r.y*f,w:r.w*f,h:r.h*f};l.w*=f;l.h*=f;}
 function drawImageLayer(g,l){
-  const im=getImg(l.key); if(!imgOk(im))return;
-  const nw=im.naturalWidth,nh=im.naturalHeight,k=Math.max(l.w/nw,l.h/nh),sw=l.w/k,sh=l.h/k;
-  g.save(); if(l.flip){g.translate(l.x*2+l.w,0);g.scale(-1,1);}
-  g.drawImage(im,(nw-sw)/2,(nh-sh)/2,sw,sh,l.x,l.y,l.w,l.h); g.restore();
+  const im=getImg(l.key); if(!imgOk(im))return;const r=imgRect(l);
+  g.save(); g.beginPath(); g.rect(l.x,l.y,l.w,l.h); g.clip();
+  if(l.flip){g.translate(l.x*2+l.w,0);g.scale(-1,1);}
+  g.drawImage(im,l.x+r.x,l.y+r.y,r.w,r.h); g.restore();
   if(l.frame){g.save();g.lineWidth=6;g.strokeStyle='#16161a';g.strokeRect(l.x+3,l.y+3,l.w-6,l.h-6);g.restore();}
 }
 function drawLayerTo(g,l){
@@ -470,8 +504,8 @@ function rasterLayer(p,name){const l=mkLayer('raster',{name:name||('絵 '+((p?p.
 function SER(l){
   const o={id:l.id,type:l.type,name:l.name||'',visible:!!l.visible,locked:!!l.locked,opacity:l.opacity,blend:l.blend||'normal'};
   if(l.type==='raster')o.key=l.key||null;
-  if(l.type==='image')Object.assign(o,{key:l.key,nw:l.nw||0,nh:l.nh||0,x:l.x,y:l.y,w:l.w,h:l.h,frame:!!l.frame,flip:!!l.flip,rot:l.rot||0});
-  if(l.type==='text')Object.assign(o,{x:l.x,y:l.y,text:l.text||'',font:l.font||0,size:l.size,color:l.color,outline:!!l.outline,vertical:!!l.vertical,bubble:l.bubble||'none',tail:l.tail||'none',rot:l.rot||0});
+  if(l.type==='image')Object.assign(o,{key:l.key,nw:l.nw||0,nh:l.nh||0,x:l.x,y:l.y,w:l.w,h:l.h,frame:!!l.frame,flip:!!l.flip,rot:l.rot||0,cr:l.cr?{...l.cr}:null});
+  if(l.type==='text')Object.assign(o,{x:l.x,y:l.y,text:l.text||'',font:l.font||0,size:l.size,color:l.color,outline:!!l.outline,vertical:!!l.vertical,bubble:l.bubble||'none',tail:l.tail||'none',rot:l.rot||0,bw:l.bw||0,bh:l.bh||0});
   return o;
 }
 function newPage(sample){
@@ -634,7 +668,7 @@ function syncLayers(p){
 function makeNode(l,p){
   if(l.type==='raster'){l.canvas.className='ly raster';l._node=l.canvas;return;}
   let n;
-  if(l.type==='image'){n=document.createElement('div');n.className='ly limg';const im=document.createElement('img');im.alt='';im.draggable=false;n.appendChild(im);Store.getUrl(l.key).then(u=>{if(u)im.src=u;});getImg(l.key);}
+  if(l.type==='image'){n=document.createElement('div');n.className='ly limg';n.innerHTML='<div class="lin"><img class="gimg" alt="" draggable="false"><img class="mimg" alt="" draggable="false"></div>';Store.getUrl(l.key).then(u=>{if(u)$$('img',n).forEach(im=>im.src=u);});getImg(l.key);}
   else{n=document.createElement('canvas');n.className='ly ltxt';}
   n.addEventListener('pointerdown',e=>objDown(e,p,l));
   l._node=n;
@@ -642,7 +676,9 @@ function makeNode(l,p){
 function paintLayer(l){
   const n=l._node;if(!n)return;n.hidden=!l.visible;n.style.opacity=l.opacity;n.style.mixBlendMode=l.blend||'normal';n.classList.toggle('locked',!!l.locked);
   if(l.type!=='raster')n.style.transform=l.rot?`rotate(${l.rot}deg)`:'';
-  if(l.type==='image'){Object.assign(n.style,{left:l.x+'px',top:l.y+'px',width:l.w+'px',height:l.h+'px'});n.classList.toggle('framed',!!l.frame);n.classList.toggle('flip',!!l.flip);}
+  if(l.type==='image'){Object.assign(n.style,{left:l.x+'px',top:l.y+'px',width:l.w+'px',height:l.h+'px'});n.classList.toggle('framed',!!l.frame);n.classList.toggle('flip',!!l.flip);n.classList.toggle('cropping',cropL===l);
+    const r=imgRect(l),pos={left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'};$$('img',n).forEach(im=>Object.assign(im.style,pos));
+    $('.mimg',n).style.clipPath=`inset(${-r.y}px ${r.x+r.w-l.w}px ${r.y+r.h-l.h}px ${-r.x}px)`;}
   if(l.type==='text'){const L=textLayout(l),w2=L.bw+2*L.m,h2=L.bh+2*L.m;n.width=Math.ceil(w2*DR);n.height=Math.ceil(h2*DR);
     Object.assign(n.style,{width:w2+'px',height:h2+'px',left:(l.x-L.m)+'px',top:(l.y-L.m)+'px'});
     const g=n.getContext('2d');g.setTransform(DR,0,0,DR,0,0);drawText(g,l,L.m,L.m,L);}
@@ -856,32 +892,52 @@ function setColor(c){brush.color=c;if(!PALETTE.includes(c)){recent=[c,...recent.
 function updSel(){
   railSoon();
   const l=cur.layer,show=work&&tool==='move'&&objSel&&l&&(l.type==='image'||l.type==='text')&&cur.page&&cur.page.layers.includes(l)&&l.visible;
+  if(cropL&&(!show||cropL!==l))endCrop(false);
   if(!show){selbox.remove();return;}
+  selbox.classList.toggle('crop',cropL===l);selbox.classList.toggle('box',l.type==='text');
   const b=objBounds(l);cur.page._in.appendChild(selbox);Object.assign(selbox.style,{left:b.x+'px',top:b.y+'px',width:b.w+'px',height:b.h+'px',transform:l.rot?`rotate(${l.rot}deg)`:''});selbox.classList.toggle('locked',!!l.locked);
 }
 function objDown(e,p,l){
   if(tool!=='move'||l.locked||G)return;e.stopPropagation();e.preventDefault();
   setCurPage(p);cur.layer=l;objSel=true;updSel();if(sheet!=='photos'){sheet='tool';}renderSheet();
-  startObjDrag(e,p,l,false);
+  startObjDrag(e,p,l,cropL===l?'pan':'move');
 }
-$('.handle',selbox).addEventListener('pointerdown',e=>{if(!cur.layer||G)return;e.stopPropagation();e.preventDefault();startObjDrag(e,cur.page,cur.layer,true);});
-function startObjDrag(e,p,l,resize){
-  const pt=toLocal(e,p),b=objBounds(l);pushStruct(p);
-  D={p,l:cur.layer,id:l.id,sx:pt.x,sy:pt.y,ox:l.x,oy:l.y,ow:b.w,oh:b.h,os:l.size,resize,moved:false,pid:e.pointerId};
+$('.handle',selbox).addEventListener('pointerdown',e=>{if(!cur.layer||G)return;e.stopPropagation();e.preventDefault();startObjDrag(e,cur.page,cur.layer,'scale');});
+$$('.ch',selbox).forEach(h=>h.addEventListener('pointerdown',e=>{if(!cur.layer||G||cur.layer.locked)return;e.stopPropagation();e.preventDefault();startObjDrag(e,cur.page,cur.layer,'edge:'+h.dataset.h);}));
+function startObjDrag(e,p,l,mode){
+  const pt=toLocal(e,p),b=objBounds(l);pushStruct(p);const wasFixed=l.bw>0;
+  if(l.type==='text'&&mode.startsWith('edge:')&&!(l.bw>0)){const L=textLayout(l);l.bw=L.bw;l.bh=L.bh;}
+  D={p,l:cur.layer,id:l.id,sx:pt.x,sy:pt.y,ox:l.x,oy:l.y,ow:b.w,oh:b.h,os:l.size,obw:l.bw,obh:l.bh,ow2:l.w,oh2:l.h,ocr:l.type==='image'?{...imgRect(l)}:null,oip:l.type==='image'?imgPage(l):null,mode,wasFixed,moved:false,pid:e.pointerId};
   try{e.target.setPointerCapture(e.pointerId);}catch(_){}
 }
 function objMove(e){
   const l=D.l,pt=toLocal(e,D.p);let dx=pt.x-D.sx,dy=pt.y-D.sy;if(!D.moved&&Math.hypot(dx,dy)<2)return;D.moved=true;
-  if(D.resize&&l.rot){const a=-l.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);[dx,dy]=[dx*c-dy*s,dx*s+dy*c];}
-  if(D.resize){if(l.type==='image'){l.w=Math.max(40,D.ow+dx);l.h=Math.max(40,D.oh+dy);}else l.size=clamp(Math.round(D.os*(D.ow+dx)/D.ow),10,260);}
-  else{l.x=D.ox+dx;l.y=D.oy+dy;}
+  if(D.mode!=='move'&&l.rot){const a=-l.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);[dx,dy]=[dx*c-dy*s,dx*s+dy*c];}
+  if(D.mode==='move'){l.x=D.ox+dx;l.y=D.oy+dy;}
+  else if(D.mode==='scale'){
+    const f=Math.max(40/Math.min(D.ow,D.oh),(D.ow+dx)/D.ow);
+    if(l.type==='image'){l.cr={x:D.ocr.x*f,y:D.ocr.y*f,w:D.ocr.w*f,h:D.ocr.h*f};l.w=D.ow2*f;l.h=D.oh2*f;}
+    else if(l.bw>0){l.bw=D.obw*f;l.bh=D.obh*f;}
+    else l.size=clamp(Math.round(D.os*f),10,260);}
+  else if(D.mode==='pan'&&l.type==='image'){
+    const R=D.oip;let nx=R.x+dx,ny=R.y+dy;nx=clamp(nx,l.x+l.w-R.w,l.x);ny=clamp(ny,l.y+l.h-R.h,l.y);setImgPage(l,{x:nx,y:ny,w:R.w,h:R.h});}
+  else if(D.mode.startsWith('edge:')){
+    const h=D.mode.slice(5),MIN=40;let L0=D.ox,T0=D.oy,R0=D.ox+D.ow2,B0=D.oy+D.oh2;
+    if(l.type==='text'){R0=D.ox+D.obw;B0=D.oy+D.obh;}
+    let L=L0,T=T0,R=R0,B=B0;
+    if(h.includes('w'))L=Math.min(L0+dx,R0-MIN);if(h.includes('e'))R=Math.max(R0+dx,L0+MIN);
+    if(h.includes('n'))T=Math.min(T0+dy,B0-MIN);if(h.includes('s'))B=Math.max(B0+dy,T0+MIN);
+    if(l.type==='image'){const I=D.oip;L=Math.max(L,I.x);T=Math.max(T,I.y);R=Math.min(R,I.x+I.w);B=Math.min(B,I.y+I.h);
+      l.x=L;l.y=T;l.w=R-L;l.h=B-T;setImgPage(l,I);}
+    else{l.x=L;l.y=T;l.bw=R-L;l.bh=B-T;}
+  }
   paintLayer(l);updSel();
 }
 function objUp(cancel){
   const d=D;D=null;
   if(!d.moved){const e=hist.pop();updUndo();return;}
   if(cancel){const e=hist.pop();if(e)applyEntry(e);updUndo();updSel();return;}
-  markDirty();if(sheet==='tool'&&d.l.type==='text'){const s=$('#oSize');if(s){s.value=d.l.size;$('#oSizeV').textContent=d.l.size+'px';}}
+  markDirty();if(sheet==='tool'&&d.l.type==='text'&&d.l.bw>0&&!d.wasFixed){renderSheet();return;}if(sheet==='tool'&&d.l.type==='text'){const s=$('#oSize');if(s){s.value=d.l.size;$('#oSizeV').textContent=d.l.size+'px';}}
 }
 function insertAbove(p,l){const i=cur.page===p&&cur.layer?p.layers.indexOf(cur.layer):-1;p.layers.splice(i>=0?i+1:p.layers.length,0,l);cur.layer=l;}
 function viewCenterOf(p){const r=p._in.getBoundingClientRect(),d=desk.getBoundingClientRect();return{x:clamp((d.left+d.width/2-r.left)/scale,120,PW-120),y:clamp((d.top+d.height/2-r.top)/scale,120,PH-120)};}
@@ -897,6 +953,8 @@ async function placePhoto(ph,p,cx,cy){
   const l=mkLayer('image',{name:'写真',key:ph.key,nw,nh,w,h,x:clamp(cx-w/2,-w/2,PW-w/2),y:clamp(cy-h/2,-h/2,PH-h/2),frame:true,flip:false});
   pushStruct(p);insertAbove(p,l);objSel=true;setTool('move');syncLayers(p);updSel();markDirty();
 }
+function startCrop(){const l=cur.layer;if(!l||l.type!=='image'||l.locked)return;cropL=l;if(sheet!=='tool')sheet='tool';paintLayer(l);updSel();renderSheet();}
+function endCrop(rerender=true){const l=cropL;cropL=null;if(l)paintLayer(l);selbox.classList.remove('crop');if(rerender){updSel();renderSheet();}}
 function objEdit(fn,rerender=true){const l=cur.layer;pushStruct(cur.page);fn(l);paintLayer(l);updSel();markDirty();if(rerender)renderSheet();}
 function dupLayer(){const p=cur.page,l=cur.layer;if(!l)return;pushStruct(p);const o={...SER(l),id:uid(),name:l.name+' のコピー'};
   if(l.type==='raster'){o.canvas=copyCanvas(l.canvas);o.key=null;o.ver=1;o.savedVer=0;}else{o.x+=30;o.y+=30;}
@@ -1047,7 +1105,8 @@ function wireRot(l){
 function textSheet(l){
   sheetEl.innerHTML=head('文字',l.locked?'ロック中':'')+`<textarea id="oText" rows="2" aria-label="文字の内容"></textarea>
   <div class="row">${FONTS.map((f,i)=>`<button class="chip fontchip" data-font="${i}" style="font-family:${f.fam},sans-serif;font-weight:${f.w}" aria-pressed="${pr(l.font===i)}">あア字<small>${f.name}</small></button>`).join('')}</div>
-  ${slider('oSize','大きさ',10,260,1,l.size,v=>v+'px')}
+  ${l.bw>0?`<div class="row"><span class="lbl">大きさ</span><span class="note" style="flex:1">吹き出しの大きさに合わせて自動（いま${textLayout(l).s}px）</span><button class="chip" id="oUnfix">文字に合わせた吹き出しに戻す</button></div>`:slider('oSize','大きさ',10,260,1,l.size,v=>v+'px')}
+  <p class="note">四辺の白いつまみで吹き出しの大きさを自由に変えると、中の文字が真ん中に収まる大きさになります。</p>
   ${rotHTML(l)}
   <div class="row"><button class="chip" id="oVert" aria-pressed="${pr(l.vertical)}">縦書き</button><button class="chip" id="oOut" aria-pressed="${pr(l.outline)}">フチ取り</button></div>
   ${colorsHTML(l.color)}
@@ -1057,20 +1116,37 @@ function textSheet(l){
   const ta=$('#oText',sheetEl);ta.value=l.text;ta.addEventListener('focus',()=>pushStruct(cur.page),{once:true});
   ta.oninput=()=>{l.text=ta.value;l.name=(ta.value.split('\n')[0]||'文字').slice(0,12);paintLayer(l);updSel();markDirty();};
   wireChips('font',v=>objEdit(x=>x.font=+v));wireChips('bub',v=>objEdit(x=>x.bubble=v));wireChips('tail',v=>objEdit(x=>x.tail=v));
-  wireSlider('oSize',v=>v+'px',v=>{l.size=v;paintLayer(l);updSel();markDirty();},()=>pushStruct(cur.page));
+  if(l.bw>0)$('#oUnfix',sheetEl).onclick=()=>objEdit(x=>{x.size=textLayout(x).s;x.bw=0;x.bh=0;});
+  else wireSlider('oSize',v=>v+'px',v=>{l.size=v;paintLayer(l);updSel();markDirty();},()=>pushStruct(cur.page));
   wireRot(l);
   $('#oVert',sheetEl).onclick=()=>objEdit(x=>x.vertical=!x.vertical);$('#oOut',sheetEl).onclick=()=>objEdit(x=>x.outline=!x.outline);
   wireColors(c=>{setColor(c);objEdit(x=>x.color=c);});
   $('#oDup',sheetEl).onclick=dupLayer;twoTap($('#oDel',sheetEl),delLayer,'もう一度で削除');
 }
 function imageSheet(l){
-  sheetEl.innerHTML=head('写真',l.locked?'ロック中':'')+`<p class="note">ドラッグで移動。右下の丸で大きさを変えると、はみ出た部分は切り取られます。</p>
-  <div class="row"><button class="chip" id="iFrame" aria-pressed="${pr(l.frame)}">コマ枠</button><button class="chip" id="iFlip" aria-pressed="${pr(l.flip)}">左右反転</button><button class="chip" id="iFull">横幅いっぱい</button><button class="chip" id="iRatio">元の比率に戻す</button></div>
+  if(cropL===l){
+    const r=imgRect(l),minK=Math.max(l.w/r.w,l.h/r.h),pct=Math.round(100/minK);
+    sheetEl.innerHTML=head('写真の切り取り','')+`<p class="note">オレンジの枠の四隅・四辺のつまみで、残す範囲を自由に決めます。枠の中を指で動かすと、写真の見える位置を調整できます。うすく見えている部分は切り取られます。</p>
+    ${slider('cZoom','中の写真の大きさ',100,400,1,pct,v=>v+'%')}
+    <div class="row"><button class="chip" id="cReset">切り取りをやめて元に戻す</button><button class="chip go" id="cDone">完了</button></div>`;
+    let base=null;
+    wireSlider('cZoom',v=>v+'%',v=>{
+      if(!base){const r0=imgRect(l),k0=Math.max(l.w/r0.w,l.h/r0.h);base={cw:r0.w*k0,ch:r0.h*k0,cx:(l.w/2-r0.x)/r0.w,cy:(l.h/2-r0.y)/r0.h};}
+      const w=base.cw*v/100,h=base.ch*v/100;let x=l.w/2-base.cx*w,y=l.h/2-base.cy*h;x=clamp(x,l.w-w,0);y=clamp(y,l.h-h,0);
+      l.cr={x,y,w,h};paintLayer(l);markDirty();},()=>pushStruct(cur.page));
+    $('#cZoom',sheetEl).addEventListener('pointerdown',()=>{base=null;});
+    $('#cReset',sheetEl).onclick=()=>objEdit(x=>{const I=imgPage(x);x.x=I.x;x.y=I.y;x.w=I.w;x.h=I.h;x.cr={x:0,y:0,w:I.w,h:I.h};});
+    $('#cDone',sheetEl).onclick=()=>endCrop();
+    return;
+  }
+  sheetEl.innerHTML=head('写真',l.locked?'ロック中':'')+`<p class="note">ドラッグで移動。右下の丸で、切り取った形のまま大きさを変えられます。</p>
+  <div class="row"><button class="chip go" id="iCrop" ${l.locked?'disabled':''}>切り取り</button><button class="chip" id="iFrame" aria-pressed="${pr(l.frame)}">コマ枠</button><button class="chip" id="iFlip" aria-pressed="${pr(l.flip)}">左右反転</button><button class="chip" id="iFull">横幅いっぱい</button><button class="chip" id="iRatio">切り取りを元に戻す</button></div>
   ${rotHTML(l)}
   <div class="row"><button class="chip" id="oDup">${ic('copy')}複製</button><button class="chip danger" id="oDel">${ic('trash')}削除</button></div>`;
+  $('#iCrop',sheetEl).onclick=startCrop;
   $('#iFrame',sheetEl).onclick=()=>objEdit(x=>x.frame=!x.frame);$('#iFlip',sheetEl).onclick=()=>objEdit(x=>x.flip=!x.flip);
-  $('#iFull',sheetEl).onclick=()=>objEdit(x=>{const r=x.h/x.w;x.x=0;x.w=PW;x.h=PW*r;},false);
-  $('#iRatio',sheetEl).onclick=()=>objEdit(x=>{if(x.nw)x.h=x.w*x.nh/x.nw;},false);
+  $('#iFull',sheetEl).onclick=()=>objEdit(x=>{scaleImage(x,PW/x.w);x.x=0;},false);
+  $('#iRatio',sheetEl).onclick=()=>objEdit(x=>{const I=imgPage(x),cx=x.x+x.w/2,cy=x.y+x.h/2,w=I.w,h=I.h;x.x=cx-w/2;x.y=cy-h/2;x.w=w;x.h=h;x.cr={x:0,y:0,w,h};},false);
   wireRot(l);
   $('#oDup',sheetEl).onclick=dupLayer;twoTap($('#oDel',sheetEl),delLayer,'もう一度で削除');
 }
