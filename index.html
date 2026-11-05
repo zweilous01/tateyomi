@@ -106,6 +106,8 @@ a.chip{color:var(--fg);text-decoration:none}
 #zoomVal{font-size:11px;min-width:3.8em;border:0;background:none;font-variant-numeric:tabular-nums;padding:0}
 #rotVal{font-size:11px;border:0;border-radius:999px;background:var(--accent);color:#fff;font-variant-numeric:tabular-nums;padding:3px 9px;margin-left:4px}
 
+#sheet .row.more .chip{font-size:12px}
+#sheet .morebox{display:grid;gap:9px;padding:9px 10px;border-radius:12px;background:var(--chip)}
 #sheet{max-height:46%;overflow-y:auto;background:var(--surface);border-top:1px solid var(--line);padding-block:8px 12px;display:grid;gap:9px;align-content:start}
 .shead{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;font-size:14px;letter-spacing:.04em}
 .shead small{font-weight:400;color:var(--muted);margin-left:6px;letter-spacing:0;font-size:12px}
@@ -451,7 +453,7 @@ function fitSize(l){
   return clamp(Math.floor(s),6,400);
 }
 function textLayout(l){
-  const fixed=l.bw>0&&l.bh>0, s=fixed?fitSize(l):l.size;
+  const fixed=l.bw>0&&l.bh>0, s=fixed&&!l.fs?fitSize(l):l.size;
   const {lh,lines,cols,cw,ch}=contentSize(l,s);
   const b=l.bubble||'none'; let bw,bh;
   if(fixed){bw=l.bw;bh=l.bh;}
@@ -541,7 +543,7 @@ function SER(l){
   if(l.type==='raster')o.key=l.key||null;
   if(l.type==='image')Object.assign(o,{key:l.key,nw:l.nw||0,nh:l.nh||0,x:l.x,y:l.y,w:l.w,h:l.h,frame:!!l.frame,flip:!!l.flip,rot:l.rot||0,cr:l.cr?{...l.cr}:null});
   if(l.type==='talk')o.items=(l.items||[]).map(SERtext);
-  if(l.type==='text')Object.assign(o,{x:l.x,y:l.y,text:l.text||'',font:l.font||0,size:l.size,color:l.color,outline:!!l.outline,vertical:!!l.vertical,bubble:l.bubble||'none',tail:l.tail||'none',rot:l.rot||0,bw:l.bw||0,bh:l.bh||0});
+  if(l.type==='text')Object.assign(o,{x:l.x,y:l.y,text:l.text||'',font:l.font||0,size:l.size,color:l.color,outline:!!l.outline,vertical:!!l.vertical,bubble:l.bubble||'none',tail:l.tail||'none',rot:l.rot||0,bw:l.bw||0,bh:l.bh||0,fs:!!l.fs});
   return o;
 }
 function newPage(sample){
@@ -560,7 +562,7 @@ function findLayerByCanvas(c){for(const p of work?work.pages:[])for(const l of p
 function selObj(){const l=cur.layer;if(l&&l.type==='talk'){return l.items.includes(cur.item)?cur.item:null;}return l;}
 function talkOf(o){if(!o||o.type!=='text')return null;for(const p of work?work.pages:[])for(const l of p.layers)if(l.type==='talk'&&l.items.includes(o))return{p,l};return null;}
 function topTalk(p,create){let t=null;for(const l of p.layers)if(l.type==='talk')t=l;if(!t&&create){t=mkLayer('talk',{name:'セリフ',items:[]});p.layers.push(t);}return t;}
-function SERtext(o){return{id:o.id,type:'text',name:o.name||'',x:o.x,y:o.y,text:o.text||'',font:o.font||0,size:o.size,color:o.color,outline:!!o.outline,vertical:!!o.vertical,bubble:o.bubble||'none',tail:o.tail||'none',rot:o.rot||0,bw:o.bw||0,bh:o.bh||0};}
+function SERtext(o){return{id:o.id,type:'text',name:o.name||'',x:o.x,y:o.y,text:o.text||'',font:o.font||0,size:o.size,color:o.color,outline:!!o.outline,vertical:!!o.vertical,bubble:o.bubble||'none',tail:o.tail||'none',rot:o.rot||0,bw:o.bw||0,bh:o.bh||0,fs:!!o.fs};}
 function objBounds(l){if(l.type==='image')return{x:l.x,y:l.y,w:l.w,h:l.h};const L=textLayout(l);return{x:l.x,y:l.y,w:L.bw,h:L.bh};}
 function typeLabel(l){return l.type==='raster'?'絵':l.type==='image'?'写真':l.type==='talk'?'セリフ':'文字';}
 
@@ -979,7 +981,8 @@ $('.handle',selbox).addEventListener('pointerdown',e=>{if(!selObj()||G)return;e.
 $$('.ch',selbox).forEach(h=>h.addEventListener('pointerdown',e=>{if(!selObj()||G||cur.layer.locked)return;e.stopPropagation();e.preventDefault();startObjDrag(e,cur.page,selObj(),'edge:'+h.dataset.h);}));
 function startObjDrag(e,p,l,mode){
   const pt=toLocal(e,p),b=objBounds(l);pushStruct(p);const wasFixed=l.bw>0;
-  if(l.type==='text'&&mode.startsWith('edge:')&&!(l.bw>0)){const L=textLayout(l);l.bw=L.bw;l.bh=L.bh;}
+  /* 吹き出しの大きさを変えても文字の大きさはそのまま（別々に変える） */
+  if(l.type==='text'&&(mode.startsWith('edge:')||mode==='scale')&&!l.fs){const L=textLayout(l);l.size=L.s;l.fs=true;if(mode.startsWith('edge:')&&!(l.bw>0)){l.bw=L.bw;l.bh=L.bh;}}
   D={p,l,ly:cur.layer,id:l.id,sx:pt.x,sy:pt.y,ox:l.x,oy:l.y,ow:b.w,oh:b.h,os:l.size,obw:l.bw,obh:l.bh,ow2:l.w,oh2:l.h,ocr:l.type==='image'?{...imgRect(l)}:null,oip:l.type==='image'?imgPage(l):null,mode,wasFixed,moved:false,pid:e.pointerId,last:{clientX:e.clientX,clientY:e.clientY},tp:null};
   if(mode==='move'&&l.type==='text')dragScroll();
   try{e.target.setPointerCapture(e.pointerId);}catch(_){}
@@ -993,7 +996,7 @@ function objMove(e){
   else if(D.mode==='scale'){
     const f=Math.max(40/Math.min(D.ow,D.oh),(D.ow+dx)/D.ow);
     if(l.type==='image'){l.cr={x:D.ocr.x*f,y:D.ocr.y*f,w:D.ocr.w*f,h:D.ocr.h*f};l.w=D.ow2*f;l.h=D.oh2*f;}
-    else if(l.bw>0){l.bw=D.obw*f;l.bh=D.obh*f;}
+    else if(l.bw>0){l.bw=D.obw*f;l.bh=D.obh*f;l.size=clamp(Math.round(D.os*f),6,400);}
     else l.size=clamp(Math.round(D.os*f),10,260);}
   else if(D.mode==='pan'&&l.type==='image'){
     const R=D.oip;let nx=R.x+dx,ny=R.y+dy;nx=clamp(nx,l.x+l.w-R.w,l.x);ny=clamp(ny,l.y+l.h-R.h,l.y);setImgPage(l,{x:nx,y:ny,w:R.w,h:R.h});}
@@ -1218,28 +1221,39 @@ function wireRot(l){
   wireSlider('oRot',v=>v+'°',v=>{l.rot=v;paintLayer(cur.layer);updSel();markDirty();},()=>pushStruct(cur.page));
   wireChips('rot',v=>objEdit(x=>{const d=+v;x.rot=d===0?0:((((x.rot||0)+d)+540)%360)-180;}));
 }
+let textMore=null; /* 文字の設定で開いている引き出し */
 function textSheet(l){
+  const FN=FONTS[l.font]||FONTS[0],canMove=cur.layer.type==='talk'||cur.layer.type==='text';
+  const MORE=[['font','フォント：'+FN.name],['style','縦書き・フチ'],['color','色'],['rot','回転'],...(canMove?[['page','ページ移動']]:[]),['edit','複製・削除']];
+  if(textMore&&!MORE.some(m=>m[0]===textMore))textMore=null;
+  const panel={
+    font:()=>`<div class="row">${FONTS.map((f,i)=>`<button class="chip fontchip" data-font="${i}" style="font-family:${f.fam},sans-serif;font-weight:${f.w}" aria-pressed="${pr(l.font===i)}">あア字<small>${f.name}</small></button>`).join('')}</div>`,
+    style:()=>`<div class="row"><button class="chip" id="oVert" aria-pressed="${pr(l.vertical)}">縦書き</button><button class="chip" id="oOut" aria-pressed="${pr(l.outline)}">フチ取り</button></div>`,
+    color:()=>colorsHTML(l.color),
+    rot:()=>rotHTML(l),
+    page:()=>`<div class="row"><button class="chip" id="oPrev">${ic('up')}前のページへ</button><button class="chip" id="oNext">${ic('down')}次のページへ</button></div><p class="note">吹き出しを別のページの上までドラッグして離しても移せます。</p>`,
+    edit:()=>`<div class="row"><button class="chip" id="oDup">${ic('copy')}複製</button><button class="chip danger" id="oDel">${ic('trash')}削除</button></div>`,
+  };
   sheetEl.innerHTML=head('文字',l.locked?'ロック中':'')+`<textarea id="oText" rows="2" aria-label="文字の内容"></textarea>
-  <div class="row">${FONTS.map((f,i)=>`<button class="chip fontchip" data-font="${i}" style="font-family:${f.fam},sans-serif;font-weight:${f.w}" aria-pressed="${pr(l.font===i)}">あア字<small>${f.name}</small></button>`).join('')}</div>
-  ${l.bw>0?`<div class="row"><span class="lbl">大きさ</span><span class="note" style="flex:1">吹き出しの大きさに合わせて自動（いま${textLayout(l).s}px）</span><button class="chip" id="oUnfix">文字に合わせた吹き出しに戻す</button></div>`:slider('oSize','大きさ',10,260,1,l.size,v=>v+'px')}
-  <p class="note">四辺の白いつまみで吹き出しの大きさを自由に変えると、中の文字が真ん中に収まる大きさになります。<br>吹き出しを別のページの上までドラッグして離すと、そのページへ移せます。</p>
-  ${rotHTML(l)}
-  <div class="row"><button class="chip" id="oVert" aria-pressed="${pr(l.vertical)}">縦書き</button><button class="chip" id="oOut" aria-pressed="${pr(l.outline)}">フチ取り</button></div>
-  ${colorsHTML(l.color)}
+  ${slider('oSize','文字の大きさ',6,260,1,textLayout(l).s,v=>v+'px')}
+  ${l.bw>0?`<div class="row"><span class="lbl">合わせる</span><button class="chip" id="oFit">文字を吹き出しにぴったり</button><button class="chip" id="oUnfix">吹き出しを文字に合わせる</button></div>`:''}
   <div class="row"><span class="lbl">吹き出し</span>${chips('bub',BUBBLES,l.bubble)}</div>
   <div class="row"><span class="lbl">しっぽ</span>${TAILS.map(([v,n])=>`<button class="chip" data-tail="${v}" aria-pressed="${pr(v===(l.tail||'none'))}" ${l.bubble==='none'?'disabled':''}>${n}</button>`).join('')}</div>
-  ${cur.layer.type==='talk'||cur.layer.type==='text'?`<div class="row"><span class="lbl">ページ</span><button class="chip" id="oPrev">${ic('up')}前のページへ</button><button class="chip" id="oNext">${ic('down')}次のページへ</button></div>`:''}
-  <div class="row"><button class="chip" id="oDup">${ic('copy')}複製</button><button class="chip danger" id="oDel">${ic('trash')}削除</button></div>`;
+  <div class="row more">${MORE.map(([k,n])=>`<button class="chip" data-more="${k}" aria-pressed="${pr(textMore===k)}">${n} ${textMore===k?'▴':'▾'}</button>`).join('')}</div>
+  ${textMore?`<div class="morebox">${panel[textMore]()}</div>`:''}`;
   const ta=$('#oText',sheetEl);ta.value=l.text;ta.addEventListener('focus',()=>pushStruct(cur.page),{once:true});
   ta.oninput=()=>{l.text=ta.value;l.name=(ta.value.split('\n')[0]||'文字').slice(0,12);paintLayer(cur.layer);updSel();markDirty();};
-  wireChips('font',v=>objEdit(x=>x.font=+v));wireChips('bub',v=>objEdit(x=>x.bubble=v));wireChips('tail',v=>objEdit(x=>x.tail=v));
-  if(l.bw>0)$('#oUnfix',sheetEl).onclick=()=>objEdit(x=>{x.size=textLayout(x).s;x.bw=0;x.bh=0;});
-  else wireSlider('oSize',v=>v+'px',v=>{l.size=v;paintLayer(cur.layer);updSel();markDirty();},()=>pushStruct(cur.page));
-  wireRot(l);
-  $('#oVert',sheetEl).onclick=()=>objEdit(x=>x.vertical=!x.vertical);$('#oOut',sheetEl).onclick=()=>objEdit(x=>x.outline=!x.outline);
-  wireColors(c=>{setColor(c);objEdit(x=>x.color=c);});
-  $('#oDup',sheetEl).onclick=dupObj;twoTap($('#oDel',sheetEl),delObj,'もう一度で削除');
-  if($('#oPrev',sheetEl)){$('#oPrev',sheetEl).onclick=()=>moveTalkTo(-1);$('#oNext',sheetEl).onclick=()=>moveTalkTo(1);}
+  wireSlider('oSize',v=>v+'px',v=>{l.size=v;if(l.bw>0)l.fs=true;paintLayer(cur.layer);updSel();markDirty();},()=>pushStruct(cur.page));
+  if(l.bw>0){$('#oFit',sheetEl).onclick=()=>objEdit(x=>{x.fs=false;x.size=textLayout(x).s;x.fs=true;});
+    $('#oUnfix',sheetEl).onclick=()=>objEdit(x=>{x.size=textLayout(x).s;x.bw=0;x.bh=0;x.fs=false;});}
+  wireChips('bub',v=>objEdit(x=>x.bubble=v));wireChips('tail',v=>objEdit(x=>x.tail=v));
+  wireChips('more',k=>{textMore=textMore===k?null:k;renderSheet();});
+  if(textMore==='font')wireChips('font',v=>objEdit(x=>x.font=+v));
+  if(textMore==='style'){$('#oVert',sheetEl).onclick=()=>objEdit(x=>x.vertical=!x.vertical);$('#oOut',sheetEl).onclick=()=>objEdit(x=>x.outline=!x.outline);}
+  if(textMore==='color')wireColors(c=>{setColor(c);objEdit(x=>x.color=c);});
+  if(textMore==='rot')wireRot(l);
+  if(textMore==='page'){$('#oPrev',sheetEl).onclick=()=>moveTalkTo(-1);$('#oNext',sheetEl).onclick=()=>moveTalkTo(1);}
+  if(textMore==='edit'){$('#oDup',sheetEl).onclick=dupObj;twoTap($('#oDel',sheetEl),delObj,'もう一度で削除');}
 }
 function imageSheet(l){
   if(cropL===l){
