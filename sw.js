@@ -1,6 +1,6 @@
 // タテ読み漫画工房：オフラインでも開けるようにする仕組み
 // 更新のたびに VERSION を変える。アプリ本体はネット優先で取りに行き、つながらないときは保存しておいた版を使う。
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open('core-' + VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));

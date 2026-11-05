@@ -163,6 +163,16 @@ input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
 .gmain{flex:1;overflow:auto;padding-block:16px 40px}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;max-width:960px;margin-inline:auto}
 .card{display:grid;gap:6px;min-width:0}
+.card.hid .cthumb{opacity:.45}
+.card .hidtag{justify-self:start;font-size:11px;font-weight:700;color:#fff;background:#6b6b78;border-radius:999px;padding:2px 8px}
+.gtools{display:flex;gap:8px;align-items:center}
+#pwDlg{position:fixed;inset:0;z-index:90;display:grid;place-items:center;background:rgb(0 0 0 / .35);padding:16px}
+#pwDlg[hidden]{display:none}
+#pwDlg .box{width:min(360px,100%);background:var(--panel,#fff);border-radius:16px;padding:18px;display:grid;gap:10px;box-shadow:0 12px 40px rgb(0 0 0 / .25)}
+#pwDlg h3{margin:0;font-size:16px}
+#pwDlg input{font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;width:100%;box-sizing:border-box}
+#pwDlg .err{color:#d33;font-size:12px;min-height:1em;margin:0}
+#pwDlg .row{display:flex;gap:8px;justify-content:flex-end}
 .cthumb{display:block;width:100%;aspect-ratio:800/1130;max-width:100%;border:0;padding:0;border-radius:6px;overflow:hidden;background:#fff;box-shadow:0 0 0 1px rgb(0 0 0 / .08),0 6px 16px rgb(0 0 0 / .12)}
 .cthumb img{width:100%;height:100%;object-fit:cover;display:block}
 .card b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -226,9 +236,11 @@ body.rail-open #desk{padding-right:calc(max(16px,env(safe-area-inset-right,0px))
 <div id="boot">読み込み中…</div>
 
 <div id="gallery" class="view" hidden>
-  <header class="top gut"><div class="logo">タテ読み漫画工房<small>マイギャラリー</small></div><button class="chip go" id="newWork">＋ 新しい漫画</button></header>
+  <header class="top gut"><div class="logo">タテ読み漫画工房<small>マイギャラリー</small></div><div class="gtools"><button class="chip" id="hidBtn">🔒 非表示の作品</button><button class="chip" id="pwBtn">パスワード設定</button><button class="chip go" id="newWork">＋ 新しい漫画</button></div></header>
   <main class="gmain gut"><div class="cards" id="cards"></div><p class="note gnote" id="storeNote"></p></main>
 </div>
+
+<div id="pwDlg" hidden><form class="box" id="pwForm"><h3 id="pwTtl"></h3><p class="note" id="pwMsg" style="margin:0"></p><input type="password" id="pwIn1" autocomplete="off"><input type="password" id="pwIn2" autocomplete="off"><p class="err" id="pwErr"></p><div class="row"><button type="button" class="chip" id="pwCancel">やめる</button><button class="chip go" id="pwOk">OK</button></div></form></div>
 
 <div id="editor" class="view" hidden>
   <header class="top gut">
@@ -603,7 +615,7 @@ async function saveWork(force){
     for(const p of w.pages)for(const l of p.layers)if(l.type==='raster'&&(!l.key||l.ver!==l.savedVer)){
       const v=l.ver,b=await canvasBlob(l.canvas,'image/png');l.key=await Store.putBlob(b);l.savedVer=v;}
     const tb=await canvasBlob(renderPage(w.pages[0],.32),'image/jpeg',.82),tk=await Store.putBlob(tb);
-    const doc={title:w.title,updatedAt:Date.now(),pageCount:w.pages.length,thumb:tk,pages:w.pages.map(p=>({id:p.id,bg:p.bg||'#ffffff',layers:p.layers.map(SER)}))};
+    const doc={title:w.title,hidden:!!w.hidden,updatedAt:Date.now(),pageCount:w.pages.length,thumb:tk,pages:w.pages.map(p=>({id:p.id,bg:p.bg||'#ffffff',layers:p.layers.map(SER)}))};
     await Store.setDoc('works',w.id,doc);
     const keep=new Set([tk]);doc.pages.forEach(p=>p.layers.forEach(l=>{if(l.type==='raster'&&l.key)keep.add(l.key);}));
     for(const k of w.lastKeys)if(!keep.has(k))Store.delBlob(k);
@@ -620,20 +632,67 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&work&&chan
 async function showGallery(){
   if(work){await saveWork(true);while(saving)await new Promise(r=>setTimeout(r,150));}
   work=null; $('#editor').hidden=true; $('#gallery').hidden=false;
-  const list=(await Store.listDocs('works')).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  const all=(await Store.listDocs('works')).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  const nHid=all.filter(d=>d.hidden).length,list=all.filter(d=>!d.hidden||hidOpen);
+  $('#hidBtn').textContent=hidOpen?'🔓 非表示の作品を隠す':`🔒 非表示の作品${nHid?`（${nHid}）`:''}`;$('#pwBtn').textContent=pwHash()?'パスワード変更':'パスワード設定';
   const box=$('#cards'); box.innerHTML='';
   if(!list.length)box.innerHTML='<div class="empty" style="grid-column:1/-1;min-height:140px">まだ作品がありません。「＋ 新しい漫画」から始めましょう</div>';
   list.forEach(d=>{
-    const a=document.createElement('article');a.className='card';
+    const a=document.createElement('article');a.className='card'+(d.hidden?' hid':'');
     const dt=new Date(d.updatedAt||0),when=`${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-    a.innerHTML=`<button class="cthumb" aria-label="${esc(d.title)}を開く"><img alt=""></button><b>${esc(d.title||'無題の漫画')}</b><small>${d.pageCount||1}ページ・${when}</small><div class="row"><button class="chip" data-a="dup">複製</button><button class="chip danger" data-a="del">削除</button></div>`;
+    a.innerHTML=`<button class="cthumb" aria-label="${esc(d.title)}を開く"><img alt=""></button><b>${esc(d.title||'無題の漫画')}</b><small>${d.pageCount||1}ページ・${when}</small>${d.hidden?'<span class="hidtag">非表示中</span>':''}<div class="row"><button class="chip" data-a="dup">複製</button><button class="chip" data-a="hid">${d.hidden?'表示に戻す':'非表示'}</button><button class="chip danger" data-a="del">削除</button></div>`;
     if(d.thumb)Store.getUrl(d.thumb).then(u=>{if(u)$('img',a).src=u;});
     $('.cthumb',a).onclick=()=>openWork(d.id);
     $('[data-a=dup]',a).onclick=()=>dupWork(d);
+    $('[data-a=hid]',a).onclick=()=>setHidden(d,!d.hidden);
     twoTap($('[data-a=del]',a),()=>delWork(d),'もう一度で削除');
     box.appendChild(a);
   });
   $('#storeNote').textContent={cloud:'作品と写真はclaude.aiのあなたのアカウントに保存されます。スマホでもパソコンでも同じ作品を開けます。',local:'作品と写真はこのiPadの中に保存されます（ネットには送られません）。ホーム画面のアイコンから開いてください。',memory:'この表示では保存できません。ページを閉じると作品は消えます。'}[Store.mode];
+}
+/* ===== 非表示とパスワード（全作品で共通のパスワード1つ。この端末だけに保存） ===== */
+let hidOpen=false;
+const PWK='tateyomi.pw';
+function pwHash(){try{return localStorage.getItem(PWK)||'';}catch(e){return '';}}
+async function hashPw(t){const b=new TextEncoder().encode('tateyomi:'+t);
+  if(crypto.subtle){const h=await crypto.subtle.digest('SHA-256',b);return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+  let x=5381;for(const c of b)x=((x*33)^c)>>>0;return 'f'+x.toString(16);}
+/* 小さな入力画面。twice=確認用にもう一度入れる */
+function pwAsk(title,msg,{twice=false,label1='パスワード',label2='もう一度'}={}){
+  return new Promise(res=>{const dl=$('#pwDlg'),i1=$('#pwIn1'),i2=$('#pwIn2'),er=$('#pwErr');
+    $('#pwTtl').textContent=title;$('#pwMsg').textContent=msg||'';i1.value=i2.value='';er.textContent='';
+    i1.placeholder=label1;i2.placeholder=label2;i2.hidden=!twice;dl.hidden=false;setTimeout(()=>i1.focus(),50);
+    const done=v=>{dl.hidden=true;$('#pwForm').onsubmit=null;$('#pwCancel').onclick=null;res(v);};
+    $('#pwCancel').onclick=()=>done(null);
+    $('#pwForm').onsubmit=e=>{e.preventDefault();const v=i1.value;
+      if(!v){er.textContent='入力してください';return;}
+      if(twice&&v!==i2.value){er.textContent='2回の入力が違います';return;}
+      done(v);};});
+}
+async function pwCheck(title){const h=pwHash();if(!h)return true;
+  for(;;){const v=await pwAsk(title,'パスワードを入れてください');if(v==null)return false;
+    if(await hashPw(v)===h)return true;toast('パスワードが違います');}}
+async function pwSetup(){
+  if(pwHash()&&!(await pwCheck('パスワード変更')))return false;
+  const v=await pwAsk(pwHash()?'新しいパスワード':'パスワード設定','非表示の作品を見るときに使います（全作品で共通）',{twice:true,label1:'新しいパスワード',label2:'もう一度'});
+  if(v==null)return false;
+  try{localStorage.setItem(PWK,await hashPw(v));toast('パスワードを設定しました');return true;}catch(e){toast('保存できませんでした');return false;}
+}
+/* アプリを閉じたり別のアプリに切り替えたら、また鍵をかける */
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&hidOpen){hidOpen=false;if(!$('#gallery').hidden)showGallery();}});
+$('#pwBtn').onclick=async()=>{await pwSetup();showGallery();};
+$('#hidBtn').onclick=async()=>{
+  if(hidOpen){hidOpen=false;showGallery();return;}
+  if(!pwHash()){toast('先にパスワードを設定してください');if(!(await pwSetup()))return;}
+  else if(!(await pwCheck('非表示の作品を見る')))return;
+  hidOpen=true;showGallery();
+};
+async function setHidden(d,h){
+  if(h&&!pwHash()){toast('先にパスワードを設定してください');if(!(await pwSetup()))return;}
+  if(!h&&!hidOpen&&!(await pwCheck('表示に戻す')))return;
+  try{const doc=await Store.getDoc('works',d.id);doc.hidden=h;await Store.setDoc('works',d.id,doc);
+    toast(h?'非表示にしました（「🔒 非表示の作品」から見られます）':'表示に戻しました');}catch(e){toast('変更できませんでした');}
+  showGallery();
 }
 async function delWork(d){
   const keys=new Set();if(d.thumb)keys.add(d.thumb);(d.pages||[]).forEach(p=>p.layers.forEach(l=>{if(l.type==='raster'&&l.key)keys.add(l.key);}));
@@ -658,7 +717,7 @@ async function openWork(id){
   $('#boot').hidden=false;$('#boot').textContent='開いています…';
   try{
     const d=await Store.getDoc('works',id); if(!d)throw new Error('見つかりません');
-    const w={id,title:d.title||'無題の漫画',pages:[],lastKeys:new Set(),saved:true};if(d.thumb)w.lastKeys.add(d.thumb);
+    const w={id,title:d.title||'無題の漫画',hidden:!!d.hidden,pages:[],lastKeys:new Set(),saved:true};if(d.thumb)w.lastKeys.add(d.thumb);
     const loads=[];
     for(const pd of d.pages||[]){const p={id:pd.id||uid(),bg:pd.bg||'#ffffff',layers:[]};
       for(const ld of pd.layers||[]){const l={...ld};
