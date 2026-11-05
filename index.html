@@ -676,8 +676,11 @@ function enterEditor(){
   FLOAT=null;hist.length=0;redoS.length=0;changeVer=savedVer=0;cur={page:null,layer:null};objSel=false;
   $('#gallery').hidden=true;$('#editor').hidden=false;$('#ttl').textContent=work.title;
   work.pages.forEach(p=>{p._sec=null;});
-  zoom=1; buildPages(); setCurPage(work.pages[0]); setTool('pen'); sheet=null; renderSheet(); updUndo(); setStatus('saved');
+  /* 前回さわっていたページから始める（この端末だけに覚える） */
+  const lp=lastPageGet(work.id),sp=work.pages.find(p=>p.id===lp)||work.pages[0];
+  zoom=1; buildPages(); setCurPage(sp); setTool('move'); sheet=null; renderSheet(); updUndo(); setStatus('saved');
   desk.scrollTop=0;applyUI();
+  if(sp!==work.pages[0])requestAnimationFrame(()=>{sp._sec.scrollIntoView({block:'start'});});
 }
 $('#toGallery').onclick=()=>showGallery();
 $('#ttl').onclick=()=>{
@@ -736,8 +739,10 @@ function paintLayer(l){
 function paintTextNode(n,l){const L=textLayout(l),w2=L.bw+2*L.m,h2=L.bh+2*L.m;n.width=Math.ceil(w2*DR);n.height=Math.ceil(h2*DR);
   Object.assign(n.style,{position:'absolute',width:w2+'px',height:h2+'px',left:(l.x-L.m)+'px',top:(l.y-L.m)+'px'});
   const g=n.getContext('2d');g.setTransform(DR,0,0,DR,0,0);drawText(g,l,L.m,L.m,L);}
+function lastPageGet(id){try{return JSON.parse(localStorage.getItem('tateyomi.lastPage')||'{}')[id]||null;}catch(e){return null;}}
+function lastPageSet(id,pid){try{const m=JSON.parse(localStorage.getItem('tateyomi.lastPage')||'{}');m[id]=pid;localStorage.setItem('tateyomi.lastPage',JSON.stringify(m));}catch(e){}}
 function setCurPage(p){
-  if(!p||cur.page===p)return;if(FLOAT&&FLOAT.p!==p)commitFloat();
+  if(!p||cur.page===p)return;if(work)lastPageSet(work.id,p.id);if(FLOAT&&FLOAT.p!==p)commitFloat();
   if(vrot&&p._box){const c=deskCenter();holdView(c.x,c.y,()=>{cur.page=p;applyZoom();},p);}
   cur.page=p;cur.layer=p.layers[p.layers.length-1]||null;objSel=false;
   work.pages.forEach(q=>q._sec&&q._sec.classList.toggle('cur',q===p));updSel();
