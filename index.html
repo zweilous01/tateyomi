@@ -172,7 +172,8 @@ input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
 #pwDlg h3{margin:0;font-size:16px}
 #pwDlg input{font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;width:100%;box-sizing:border-box}
 #pwDlg .err{color:#d33;font-size:12px;min-height:1em;margin:0}
-#pwDlg .row{display:flex;gap:8px;justify-content:flex-end}
+#pwDlg .row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+#pwDlg #pwForgot{font-size:12px;color:var(--muted)}
 .cthumb{display:block;width:100%;aspect-ratio:800/1130;max-width:100%;border:0;padding:0;border-radius:6px;overflow:hidden;background:#fff;box-shadow:0 0 0 1px rgb(0 0 0 / .08),0 6px 16px rgb(0 0 0 / .12)}
 .cthumb img{width:100%;height:100%;object-fit:cover;display:block}
 .card b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -240,7 +241,7 @@ body.rail-open #desk{padding-right:calc(max(16px,env(safe-area-inset-right,0px))
   <main class="gmain gut"><div class="cards" id="cards"></div><p class="note gnote" id="storeNote"></p></main>
 </div>
 
-<div id="pwDlg" hidden><form class="box" id="pwForm"><h3 id="pwTtl"></h3><p class="note" id="pwMsg" style="margin:0"></p><input type="password" id="pwIn1" autocomplete="off"><input type="password" id="pwIn2" autocomplete="off"><p class="err" id="pwErr"></p><div class="row"><button type="button" class="chip" id="pwCancel">やめる</button><button class="chip go" id="pwOk">OK</button></div></form></div>
+<div id="pwDlg" hidden><form class="box" id="pwForm"><h3 id="pwTtl"></h3><p class="note" id="pwMsg" style="margin:0"></p><input type="password" id="pwIn1" autocomplete="off"><input type="password" id="pwIn2" autocomplete="off"><p class="err" id="pwErr"></p><div class="row"><button type="button" class="chip" id="pwForgot" style="margin-right:auto">忘れたとき</button><button type="button" class="chip" id="pwCancel">やめる</button><button class="chip go" id="pwOk">OK</button></div></form></div>
 
 <div id="editor" class="view" hidden>
   <header class="top gut">
@@ -636,7 +637,7 @@ async function showGallery(){
   const nHid=all.filter(d=>d.hidden).length,list=all.filter(d=>!d.hidden||hidOpen);
   $('#hidBtn').textContent=hidOpen?'🔓 非表示の作品を隠す':`🔒 非表示の作品${nHid?`（${nHid}）`:''}`;$('#pwBtn').textContent=pwHash()?'パスワード変更':'パスワード設定';
   const box=$('#cards'); box.innerHTML='';
-  if(!list.length)box.innerHTML='<div class="empty" style="grid-column:1/-1;min-height:140px">まだ作品がありません。「＋ 新しい漫画」から始めましょう</div>';
+  if(!list.length)box.innerHTML=`<div class="empty" style="grid-column:1/-1;min-height:140px">${nHid?'表示中の作品はありません（非表示の作品は「🔒 非表示の作品」から見られます）':'まだ作品がありません。「＋ 新しい漫画」から始めましょう'}</div>`;
   list.forEach(d=>{
     const a=document.createElement('article');a.className='card'+(d.hidden?' hid':'');
     const dt=new Date(d.updatedAt||0),when=`${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
@@ -658,20 +659,29 @@ async function hashPw(t){const b=new TextEncoder().encode('tateyomi:'+t);
   if(crypto.subtle){const h=await crypto.subtle.digest('SHA-256',b);return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('');}
   let x=5381;for(const c of b)x=((x*33)^c)>>>0;return 'f'+x.toString(16);}
 /* 小さな入力画面。twice=確認用にもう一度入れる */
-function pwAsk(title,msg,{twice=false,label1='パスワード',label2='もう一度'}={}){
+const FORGOT={};
+function pwAsk(title,msg,{twice=false,forgot=false,label1='パスワード',label2='もう一度'}={}){
   return new Promise(res=>{const dl=$('#pwDlg'),i1=$('#pwIn1'),i2=$('#pwIn2'),er=$('#pwErr');
     $('#pwTtl').textContent=title;$('#pwMsg').textContent=msg||'';i1.value=i2.value='';er.textContent='';
-    i1.placeholder=label1;i2.placeholder=label2;i2.hidden=!twice;dl.hidden=false;setTimeout(()=>i1.focus(),50);
+    i1.placeholder=label1;i2.placeholder=label2;i2.hidden=!twice;dl.hidden=false;const fg=$('#pwForgot');fg.hidden=!forgot;fg.textContent='忘れたとき';fg.dataset.arm='';setTimeout(()=>i1.focus(),50);
     const done=v=>{dl.hidden=true;$('#pwForm').onsubmit=null;$('#pwCancel').onclick=null;res(v);};
     $('#pwCancel').onclick=()=>done(null);
+    $('#pwForgot').onclick=()=>{const fg=$('#pwForgot');if(!fg.dataset.arm){fg.dataset.arm='1';fg.textContent='もう一度押すと、パスワードを消して全作品を表示に戻します';return;}done(FORGOT);};
     $('#pwForm').onsubmit=e=>{e.preventDefault();const v=i1.value;
       if(!v){er.textContent='入力してください';return;}
       if(twice&&v!==i2.value){er.textContent='2回の入力が違います';return;}
       done(v);};});
 }
 async function pwCheck(title){const h=pwHash();if(!h)return true;
-  for(;;){const v=await pwAsk(title,'パスワードを入れてください');if(v==null)return false;
+  for(;;){const v=await pwAsk(title,'パスワードを入れてください',{forgot:true});if(v==null)return false;
+    if(v===FORGOT){await pwReset();return false;}
     if(await hashPw(v)===h)return true;toast('パスワードが違います');}}
+/* パスワードを忘れたとき：パスワードを消して、非表示の作品を全部表示に戻す（作品は消えない） */
+async function pwReset(){
+  try{const l=await Store.listDocs('works');for(const d of l)if(d.hidden){const doc=await Store.getDoc('works',d.id);doc.hidden=false;await Store.setDoc('works',d.id,doc);}
+    localStorage.removeItem(PWK);hidOpen=false;toast('パスワードを消して、全作品を表示に戻しました');}catch(e){toast('うまくできませんでした');}
+  if(!$('#gallery').hidden)showGallery();
+}
 async function pwSetup(){
   if(pwHash()&&!(await pwCheck('パスワード変更')))return false;
   const v=await pwAsk(pwHash()?'新しいパスワード':'パスワード設定','非表示の作品を見るときに使います（全作品で共通）',{twice:true,label1:'新しいパスワード',label2:'もう一度'});
