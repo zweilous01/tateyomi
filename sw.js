@@ -1,6 +1,6 @@
 // タテ読み漫画工房：オフラインでも開けるようにする仕組み
 // 更新のたびに VERSION を変える。アプリ本体はネット優先で取りに行き、つながらないときは保存しておいた版を使う。
-const VERSION = 'v8';
+const VERSION = 'v9';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open('core-' + VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
@@ -24,9 +24,18 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (url.origin !== location.origin) return;
-  // アプリ本体：ネット優先（新しい版をすぐ使う）、だめなら保存版
-  e.respondWith(fetch(req).then(res => {
+  // アプリ本体：ネット優先（新しい版をすぐ使う）。3秒待ってもつながらなければ保存版で開く
+  const fresh = fetch(req).then(res => {
     if (res.ok) { const copy = res.clone(); caches.open('core-' + VERSION).then(c => c.put(req, copy)); }
     return res;
-  }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html'))));
+  });
+  e.waitUntil(fresh.catch(() => {}));
+  const saved = () => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html'));
+  e.respondWith(new Promise(resolve => {
+    let done = false;
+    const give = r => { if (!done && r) { done = true; resolve(r); } };
+    const timer = setTimeout(() => saved().then(give), 3000);
+    fresh.then(r => { clearTimeout(timer); give(r); })
+      .catch(() => { clearTimeout(timer); saved().then(r => { if (r) give(r); else if (!done) { done = true; resolve(Response.error()); } }); });
+  }));
 });
